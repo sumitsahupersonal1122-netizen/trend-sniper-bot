@@ -8,5 +8,13 @@
         "time": "11:30",
         "exit_price": 22601.19921875,
         "result": "STOP LOSS HIT \u274c"
+    },
+    {
+        "type": "LONG",
+        "entry": 22753.19921875,
+        "sl": 22703.19921875,
+        "target": 22953.19921875,
+        "status": "OPEN",
+        "time": "15:15"
     }
 ]
