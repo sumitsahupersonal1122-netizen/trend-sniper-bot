@@ -30,7 +30,7 @@ def save_trades(trades):
 
 def get_nifty_data():
     try:
-        nifty = yf.download('^NSEI', period='2d', interval='15m') # 15m data for better tracking
+        nifty = yf.download('^NSEI', period='1mo', interval='15m') # 15m data for better tracking
         if nifty.empty: return None
         nifty = nifty.reset_index()
         nifty.columns = [col[0] if isinstance(col, tuple) else col for col in nifty.columns]
