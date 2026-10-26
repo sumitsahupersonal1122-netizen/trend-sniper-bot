@@ -4,7 +4,9 @@
         "entry": 22551.19921875,
         "sl": 22601.19921875,
         "target": 22351.19921875,
-        "status": "OPEN",
-        "time": "11:30"
+        "status": "CLOSED",
+        "time": "11:30",
+        "exit_price": 22601.19921875,
+        "result": "STOP LOSS HIT \u274c"
     }
 ]
