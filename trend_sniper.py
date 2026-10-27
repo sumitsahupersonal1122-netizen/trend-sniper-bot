@@ -5,7 +5,11 @@ import pyotp
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, time as dt_time, timedelta
-from smartapi import SmartConnect
+try:
+       from smartapi import SmartConnect
+   except ImportError:
+       print("smartapi module not found, trying alternative import...")
+       from SmartApi import SmartConnect
 
 # === SECRETS FROM GITHUB ===
 AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
