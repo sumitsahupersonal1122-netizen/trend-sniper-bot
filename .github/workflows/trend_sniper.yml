@@ -22,7 +22,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install yfinance pandas requests pyotp && pip install smartapi-python --upgrade
+        python -m pip install --upgrade pip
+        pip install yfinance pandas requests pyotp smartapi-python
 
     - name: Run Trend Sniper Bot
       env:
