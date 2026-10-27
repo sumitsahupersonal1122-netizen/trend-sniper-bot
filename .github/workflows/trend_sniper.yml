@@ -23,7 +23,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yfinance pandas requests pyotp smartapi-python
+        echo "Installing smartapi-python..."
+        pip install smartapi-python --no-cache-dir
+        echo "Verifying installation..."
+        python -c "import smartapi; print('smartapi imported successfully')" || echo "smartapi import failed"
+        pip list | grep -i smart
+        echo "All packages installed"
 
     - name: Run Trend Sniper Bot
       env:
