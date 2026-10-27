@@ -1,37 +1,54 @@
-import yfinance as yf
-import pandas as pd
-import requests
 import os
 import json
-from datetime import datetime
+import requests
+import pyotp
+from smartapi import SmartConnect
+import yfinance as yf
+import pandas as pd
+from datetime import datetime, time as dt_time, timedelta
 
+# === SECRETS FROM GITHUB ===
+AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
+AO_PASSWORD = os.environ.get('AO_PASSWORD')
+AO_TOTP_SECRET = os.environ.get('AO_TOTP_SECRET')
+AO_API_KEY = os.environ.get('AO_API_KEY')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+
 TRADES_FILE = 'trades.json'
+PAPER_TRADING = True  # TRUE = Sirf alert, koi real order nahi
+LOT_SIZE = 65
+BROKERAGE_PER_TRADE = 50
 
 def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram credentials missing")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
     try:
         requests.post(url, data=payload)
-        print("Alert sent!")
+        print("Telegram alert sent!")
     except Exception as e:
-        print(f"Error sending alert: {e}")
+        print(f"Telegram error: {e}")
 
-def load_trades():
-    if os.path.exists(TRADES_FILE):
-        with open(TRADES_FILE, 'r') as f:
-            return json.load(f)
-    return []
-
-def save_trades(trades):
-    with open(TRADES_FILE, 'w') as f:
-        json.dump(trades, f, indent=4)
+def login_angel_one():
+    try:
+        obj = SmartConnect(api_key=AO_API_KEY)
+        totp = pyotp.TOTP(AO_TOTP_SECRET).now()
+        data = obj.generateSession(AO_CLIENT_ID, AO_PASSWORD, totp)
+        print(f"Angel One login success! Token: {data.get('data', {}).get('jwtToken', 'N/A')[:20]}...")
+        return obj
+    except Exception as e:
+        print(f"Angel One login failed: {e}")
+        send_telegram_message(f"⚠️ Angel One Login Failed!\nError: {str(e)[:200]}")
+        return None
 
 def get_nifty_data():
     try:
-        nifty = yf.download('^NSEI', period='1mo', interval='15m') # 15m data for better tracking
-        if nifty.empty: return None
+        nifty = yf.download('^NSEI', period='1mo', interval='15m')
+        if nifty.empty:
+            return None
         nifty = nifty.reset_index()
         nifty.columns = [col[0] if isinstance(col, tuple) else col for col in nifty.columns]
         return nifty
@@ -46,70 +63,82 @@ def calculate_indicators(df):
     df['Prev_5_Low'] = df['Low'].shift(1).rolling(window=5).min()
     return df
 
-def main():
-    print("Bot started...")
-    trades = load_trades()
-    df = get_nifty_data()
-    
-    if df is None:
-        send_telegram_message("❌ Data fetch failed!")
-        return
+def load_trades():
+    if os.path.exists(TRADES_FILE):
+        with open(TRADES_FILE, 'r') as f:
+            return json.load(f)
+    return []
 
-    df = calculate_indicators(df)
-    latest = df.iloc[-1]
-    current_price = latest['Close']
-    current_time = latest['Datetime'].strftime('%H:%M')
-    
-    # 1. Check Existing Trades (SL/TP Hit?)
+def save_trades(trades):
+    with open(TRADES_FILE, 'w') as f:
+        json.dump(trades, f, indent=4)
+
+def check_open_trades(trades, current_price):
     for trade in trades:
         if trade['status'] == 'OPEN':
             hit = False
             result = ""
             exit_price = 0
-            
             if trade['type'] == 'LONG':
                 if current_price <= trade['sl']:
                     hit = True; result = "STOP LOSS HIT ❌"; exit_price = trade['sl']
                 elif current_price >= trade['target']:
-                    hit = True; result = "TARGET HIT "; exit_price = trade['target']
+                    hit = True; result = "TARGET HIT 🎯"; exit_price = trade['target']
             elif trade['type'] == 'SHORT':
                 if current_price >= trade['sl']:
-                    hit = True; result = "STOP LOSS HIT ❌"; exit_price = trade['sl']
+                    hit = True; result = "STOP LOSS HIT "; exit_price = trade['sl']
                 elif current_price <= trade['target']:
                     hit = True; result = "TARGET HIT 🎯"; exit_price = trade['target']
-            
             if hit:
                 trade['status'] = 'CLOSED'
                 trade['exit_price'] = exit_price
                 trade['result'] = result
                 pts = abs(exit_price - trade['entry'])
-                profit = (pts * 50) - 100 # Approx lot size 50 for Nifty, brokerage 100
-                msg = f" <b>Trade Closed!</b>\n{result}\nEntry: {trade['entry']}\nExit: {exit_price}\nP&L: ₹{profit}"
+                profit = (pts * LOT_SIZE) - BROKERAGE_PER_TRADE
+                msg = f"📊 <b>Trade Closed!</b>\n{result}\nEntry: {trade['entry']}\nExit: {exit_price}\nP&L: ₹{profit:.2f}"
                 send_telegram_message(msg)
 
-    # 2. Check for New Entry (Only if no open trade today)
-    # Simple logic: If last trade is closed or list is empty, look for signal
+def main():
+    print("=== Trend Sniper Bot Started ===")
+    print(f"Mode: {'PAPER TRADING' if PAPER_TRADING else 'LIVE TRADING'}")
+    
+    # Login to Angel One
+    obj = login_angel_one()
+    if obj is None:
+        print("Cannot proceed without login")
+        return
+    
+    # Get data
+    df = get_nifty_data()
+    if df is None:
+        send_telegram_message(" Data fetch failed!")
+        return
+    
+    df = calculate_indicators(df)
+    latest = df.iloc[-1]
+    current_price = latest['Close']
+    current_time = latest['Datetime'].strftime('%H:%M') if 'Datetime' in df.columns else datetime.now().strftime('%H:%M')
+    
+    print(f"Current Nifty: {current_price} at {current_time}")
+    
+    # Load trades
+    trades = load_trades()
+    
+    # Check open trades
+    check_open_trades(trades, current_price)
+    
+    # Check for new signal (only in time window)
     last_trade = trades[-1] if trades else None
     can_trade = True
     if last_trade and last_trade['status'] == 'OPEN':
-        can_trade = False # Don't take new trade if one is running
-        
-    # Time filter (10:15 to 14:15)
-    # Note: Yahoo finance time is UTC, need to be careful. 
-    # For simplicity, we check if 'Datetime' column has time. 
-    # Since we run every 15 mins, we check the latest candle.
+        can_trade = False
     
     if can_trade and len(df) > 10:
-        # Re-calculate indicators properly for the latest candle
         close = latest['Close']
         ema50 = latest['EMA_50']
         ema200 = latest['EMA_200']
         p5_high = latest['Prev_5_High']
         p5_low = latest['Prev_5_Low']
-        
-        # Check Time (Approximate for IST 10:15 - 14:15)
-        # Yahoo data index 0 is date. Let's assume valid time for now or add check.
-        # For robustness, we just check conditions.
         
         if not pd.isna(ema50) and not pd.isna(ema200):
             if close > ema50 and close > ema200 and close > p5_high:
@@ -119,7 +148,9 @@ def main():
                 }
                 trades.append(new_trade)
                 save_trades(trades)
-                send_telegram_message(f"🚨 <b>NEW SETUP!</b>\nLONG @ {close}\nSL: {close-50}\nTarget: {close+200}")
+                msg = f"🚨 <b>NEW SETUP (PAPER)!</b>\nLONG @ {close}\nSL: {close-50}\nTarget: {close+200}\nTime: {current_time}"
+                send_telegram_message(msg)
+                print(f"LONG signal at {close}")
                 
             elif close < ema50 and close < ema200 and close < p5_low:
                 new_trade = {
@@ -128,10 +159,12 @@ def main():
                 }
                 trades.append(new_trade)
                 save_trades(trades)
-                send_telegram_message(f"🚨 <b>NEW SETUP!</b>\nSHORT @ {close}\nSL: {close+50}\nTarget: {close-200}")
-
-    save_trades(trades) # Save any updates
-    print("Bot finished.")
+                msg = f"🚨 <b>NEW SETUP (PAPER)!</b>\nSHORT @ {close}\nSL: {close+50}\nTarget: {close-200}\nTime: {current_time}"
+                send_telegram_message(msg)
+                print(f"SHORT signal at {close}")
+    
+    save_trades(trades)
+    print("=== Bot Finished ===")
 
 if __name__ == '__main__':
     main()
