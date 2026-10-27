@@ -4,7 +4,7 @@ import requests
 import pyotp
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, time as dt_time, timedelta, timezone, timedelta
+from datetime import datetime, time as dt_time, timedelta, timezone
 
 # === SECRETS FROM GITHUB ===
 AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
@@ -21,6 +21,9 @@ LOT_SIZE = 65
 BROKERAGE_PER_TRADE = 50
 STARTING_CAPITAL = 50000
 MAX_DAILY_LOSSES = 2
+
+# === ANGEL ONE API URL ===
+AO_BASE_URL = "https://apiconnect.angelbroking.com"
 
 # === IST TIMEZONE ===
 IST = timezone(timedelta(hours=5, minutes=30))
