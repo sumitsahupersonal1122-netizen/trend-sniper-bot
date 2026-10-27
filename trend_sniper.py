@@ -6,11 +6,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, time as dt_time, timedelta
 
-try:
-    from smartapi import SmartConnect
-except ImportError:
-    from SmartApi import SmartConnect
-
+# === SECRETS FROM GITHUB ===
 AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
 AO_PASSWORD = os.environ.get('AO_PASSWORD')
 AO_TOTP_SECRET = os.environ.get('AO_TOTP_SECRET')
@@ -18,12 +14,16 @@ AO_API_KEY = os.environ.get('AO_API_KEY')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
+# === CONFIGURATION ===
 TRADES_FILE = 'trades.json'
 PAPER_TRADING = True
 LOT_SIZE = 65
 BROKERAGE_PER_TRADE = 50
 STARTING_CAPITAL = 50000
 MAX_DAILY_LOSSES = 2
+
+# === ANGEL ONE API ENDPOINTS ===
+AO_BASE_URL = "https://apiconnect.angelbroking.com"
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -43,13 +43,54 @@ def login_angel_one():
             print("Angel One credentials missing!")
             send_telegram_message("Angel One credentials missing in GitHub Secrets!")
             return None
-        obj = SmartConnect(api_key=AO_API_KEY)
+        
+        # Generate TOTP
         totp = pyotp.TOTP(AO_TOTP_SECRET).now()
-        data = obj.generateSession(AO_CLIENT_ID, AO_PASSWORD, totp)
-        jwt_token = data.get('data', {}).get('jwtToken', 'N/A')
-        print(f"Angel One login success! Token: {str(jwt_token)[:20]}...")
-        send_telegram_message(f"Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {datetime.now().strftime('%H:%M')}")
-        return obj
+        
+        # Login payload
+        login_payload = {
+            "clientcode": AO_CLIENT_ID,
+            "password": AO_PASSWORD,
+            "totp": totp
+        }
+        
+        # Login headers
+        login_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-UserType": "USER",
+            "X-SourceID": "WEB",
+            "X-ClientLocalIP": "CLIENT_LOCAL_IP",
+            "X-ClientPublicIP": "CLIENT_PUBLIC_IP",
+            "X-MACAddress": "MAC_ADDRESS",
+            "X-PrivateKey": AO_API_KEY
+        }
+        
+        # Make login request
+        login_url = f"{AO_BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword"
+        response = requests.post(login_url, json=login_payload, headers=login_headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') and data['status']:
+                jwt_token = data['data'].get('jwtToken', 'N/A')
+                feed_token = data['data'].get('feedToken', '')
+                print(f"Angel One login success!")
+                send_telegram_message(f"Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {datetime.now().strftime('%H:%M')}")
+                return {
+                    'jwt_token': jwt_token,
+                    'feed_token': feed_token,
+                    'client_code': AO_CLIENT_ID
+                }
+            else:
+                print(f"Login failed: {data.get('message', 'Unknown error')}")
+                send_telegram_message(f"Angel One Login Failed!\nError: {data.get('message', 'Unknown error')}")
+                return None
+        else:
+            print(f"Login request failed with status: {response.status_code}")
+            send_telegram_message(f"Angel One Login Failed!\nStatus: {response.status_code}")
+            return None
+            
     except Exception as e:
         error_msg = str(e)[:300]
         print(f"Angel One login failed: {error_msg}")
@@ -154,21 +195,25 @@ def main():
     print(f"Mode: {'PAPER TRADING' if PAPER_TRADING else 'LIVE TRADING'}")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
+    
     print("\n[1] Logging into Angel One...")
-    obj = login_angel_one()
-    if obj is None:
+    auth_data = login_angel_one()
+    if auth_data is None:
         print("Cannot proceed without login")
         return
+    
     print("\n[2] Fetching Nifty 50 data...")
     df = get_nifty_data()
     if df is None or df.empty:
         send_telegram_message("Nifty data fetch failed!")
         return
     print(f"Received {len(df)} candles")
+    
     print("\n[3] Calculating indicators...")
     df = calculate_indicators(df)
     latest = df.iloc[-1]
     current_price = latest['Close']
+    
     if 'Datetime' in df.columns:
         current_dt = latest['Datetime']
         if hasattr(current_dt, 'strftime'):
@@ -180,14 +225,19 @@ def main():
     else:
         current_time_str = datetime.now().strftime('%H:%M')
         current_time = datetime.now().time()
+    
     print(f"Current Nifty: {current_price:.2f} at {current_time_str}")
+    
     trades = load_trades()
     print(f"\n[4] Loaded {len(trades)} trades from diary")
+    
     print("\n[5] Checking open trades...")
     check_open_trades(trades, current_price, current_time_str)
+    
     can_trade = True
     has_open_trade = any(t.get('status') == 'OPEN' for t in trades)
     today_losses = get_today_losses(trades)
+    
     if has_open_trade:
         print("Already have an open trade - skipping new signal")
         can_trade = False
@@ -197,6 +247,7 @@ def main():
     elif not is_within_trading_time(current_time):
         print(f"Outside trading window ({current_time_str})")
         can_trade = False
+    
     if can_trade and len(df) > 10:
         print("\n[6] Checking for new signal...")
         close = latest['Close']
@@ -204,19 +255,23 @@ def main():
         ema200 = latest['EMA_200']
         p5_high = latest['Prev_5_High']
         p5_low = latest['Prev_5_Low']
+        
         print(f"Close: {close:.2f} | EMA50: {ema50:.2f} | EMA200: {ema200:.2f}")
         print(f"Prev5High: {p5_high:.2f} | Prev5Low: {p5_low:.2f}")
+        
         signal = None
         if not pd.isna(ema50) and not pd.isna(ema200) and not pd.isna(p5_high) and not pd.isna(p5_low):
             if close > ema50 and close > ema200 and close > p5_high:
                 signal = 'LONG'
             elif close < ema50 and close < ema200 and close < p5_low:
                 signal = 'SHORT'
+        
         if signal:
             print(f"\nNEW {signal} SIGNAL DETECTED!")
             entry_price = close
             sl = entry_price - 50 if signal == 'LONG' else entry_price + 50
             target = entry_price + 200 if signal == 'LONG' else entry_price - 200
+            
             new_trade = {
                 'type': signal,
                 'entry': entry_price,
@@ -230,12 +285,14 @@ def main():
             }
             trades.append(new_trade)
             save_trades(trades)
+            
             mode_tag = "(PAPER)" if PAPER_TRADING else "(LIVE)"
             msg = f"NEW SETUP {mode_tag}!\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str}\n\nPaper Trading Mode - Do not trade with real money yet!"
             send_telegram_message(msg)
             print(f"Signal saved: {signal} @ {entry_price:.2f}")
         else:
             print("No valid signal at this time")
+    
     save_trades(trades)
     print("\n" + "=" * 50)
     print("Bot Finished Successfully")
