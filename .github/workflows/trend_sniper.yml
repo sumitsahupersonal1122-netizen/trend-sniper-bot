@@ -22,12 +22,16 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install yfinance pandas requests
+        pip install yfinance pandas requests pyotp smartapi-python
 
     - name: Run Trend Sniper Bot
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        AO_CLIENT_ID: ${{ secrets.AO_CLIENT_ID }}
+        AO_PASSWORD: ${{ secrets.AO_PASSWORD }}
+        AO_TOTP_SECRET: ${{ secrets.AO_TOTP_SECRET }}
+        AO_API_KEY: ${{ secrets.AO_API_KEY }}
       run: python trend_sniper.py
 
     - name: Save Diary (Commit changes)
