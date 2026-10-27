@@ -5,6 +5,7 @@ import pyotp
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, time as dt_time, timedelta, timezone
+import time as time_module
 
 # === SECRETS FROM GITHUB ===
 AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
@@ -28,23 +29,35 @@ AO_BASE_URL = "https://apiconnect.angelbroking.com"
 # === IST TIMEZONE ===
 IST = timezone(timedelta(hours=5, minutes=30))
 
-def send_telegram_message(message):
+def send_telegram_message(message, retry=3):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials missing")
-        return
+        return False
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'HTML'}
-    try:
-        requests.post(url, data=payload)
-        print("Telegram alert sent!")
-    except Exception as e:
-        print(f"Telegram error: {e}")
+    
+    for attempt in range(retry):
+        try:
+            response = requests.post(url, data=payload, timeout=10)
+            if response.status_code == 200:
+                print(f"Telegram alert sent successfully!")
+                return True
+            else:
+                print(f"Telegram API error: {response.status_code}")
+        except Exception as e:
+            print(f"Telegram attempt {attempt + 1} failed: {e}")
+            if attempt < retry - 1:
+                time_module.sleep(2)
+    
+    print(f"Failed to send Telegram message after {retry} attempts")
+    return False
 
 def login_angel_one():
     try:
         if not AO_CLIENT_ID or not AO_PASSWORD or not AO_TOTP_SECRET or not AO_API_KEY:
             print("Angel One credentials missing!")
-            send_telegram_message("Angel One credentials missing in GitHub Secrets!")
+            send_telegram_message("⚠️ Angel One credentials missing in GitHub Secrets!")
             return None
         
         totp = pyotp.TOTP(AO_TOTP_SECRET).now()
@@ -67,7 +80,7 @@ def login_angel_one():
         }
         
         login_url = f"{AO_BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword"
-        response = requests.post(login_url, json=login_payload, headers=login_headers)
+        response = requests.post(login_url, json=login_payload, headers=login_headers, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
@@ -76,25 +89,26 @@ def login_angel_one():
                 feed_token = data['data'].get('feedToken', '')
                 now_ist = datetime.now(IST)
                 print(f"Angel One login success!")
-                send_telegram_message(f"Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {now_ist.strftime('%H:%M')}")
+                send_telegram_message(f"✅ Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {now_ist.strftime('%H:%M')}")
                 return {
                     'jwt_token': jwt_token,
                     'feed_token': feed_token,
                     'client_code': AO_CLIENT_ID
                 }
             else:
-                print(f"Login failed: {data.get('message', 'Unknown error')}")
-                send_telegram_message(f"Angel One Login Failed!\nError: {data.get('message', 'Unknown error')}")
+                error_msg = data.get('message', 'Unknown error')
+                print(f"Login failed: {error_msg}")
+                send_telegram_message(f"❌ Angel One Login Failed!\nError: {error_msg}")
                 return None
         else:
             print(f"Login request failed with status: {response.status_code}")
-            send_telegram_message(f"Angel One Login Failed!\nStatus: {response.status_code}")
+            send_telegram_message(f"❌ Angel One Login Failed!\nStatus: {response.status_code}")
             return None
             
     except Exception as e:
         error_msg = str(e)[:300]
         print(f"Angel One login failed: {error_msg}")
-        send_telegram_message(f"Angel One Login Failed!\nError: {error_msg}")
+        send_telegram_message(f"❌ Angel One Login Failed!\nError: {error_msg}")
         return None
 
 def get_nifty_data():
@@ -143,20 +157,20 @@ def check_open_trades(trades, current_price, current_time_str):
         if trade['type'] == 'LONG':
             if current_price <= trade['sl']:
                 hit = True
-                result = "STOP LOSS HIT"
+                result = "STOP LOSS HIT ❌"
                 exit_price = trade['sl']
             elif current_price >= trade['target']:
                 hit = True
-                result = "TARGET HIT"
+                result = "TARGET HIT 🎯"
                 exit_price = trade['target']
         elif trade['type'] == 'SHORT':
             if current_price >= trade['sl']:
                 hit = True
-                result = "STOP LOSS HIT"
+                result = "STOP LOSS HIT ❌"
                 exit_price = trade['sl']
             elif current_price <= trade['target']:
                 hit = True
-                result = "TARGET HIT"
+                result = "TARGET HIT "
                 exit_price = trade['target']
         if hit:
             trade['status'] = 'CLOSED'
@@ -165,9 +179,9 @@ def check_open_trades(trades, current_price, current_time_str):
             trade['exit_time'] = current_time_str
             pts = abs(exit_price - trade['entry'])
             profit = (pts * LOT_SIZE) - BROKERAGE_PER_TRADE
-            if result == "STOP LOSS HIT":
+            if result == "STOP LOSS HIT ❌":
                 profit = -profit
-            msg = f"Trade Closed!\n{result}\nType: {trade['type']}\nEntry: {trade['entry']:.2f}\nExit: {exit_price:.2f}\nP&L: Rs.{profit:.2f}\nTime: {current_time_str}"
+            msg = f"📊 <b>Trade Closed!</b>\n{result}\nType: {trade['type']}\nEntry: {trade['entry']:.2f}\nExit: {exit_price:.2f}\nP&L: Rs.{profit:.2f}\nTime: {current_time_str}"
             send_telegram_message(msg)
             print(f"Trade closed: {result} | P&L: Rs.{profit:.2f}")
             updated = True
@@ -206,7 +220,7 @@ def main():
     print("\n[2] Fetching Nifty 50 data...")
     df = get_nifty_data()
     if df is None or df.empty:
-        send_telegram_message("Nifty data fetch failed!")
+        send_telegram_message(" Nifty data fetch failed!")
         return
     print(f"Received {len(df)} candles")
     
@@ -275,7 +289,7 @@ def main():
                 signal = 'SHORT'
         
         if signal:
-            print(f"\nNEW {signal} SIGNAL DETECTED!")
+            print(f"\n🚨 NEW {signal} SIGNAL DETECTED!")
             entry_price = close
             sl = entry_price - 50 if signal == 'LONG' else entry_price + 50
             target = entry_price + 200 if signal == 'LONG' else entry_price - 200
@@ -295,9 +309,16 @@ def main():
             save_trades(trades)
             
             mode_tag = "(PAPER)" if PAPER_TRADING else "(LIVE)"
-            msg = f"NEW SETUP {mode_tag}!\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str}\n\nPaper Trading Mode - Do not trade with real money yet!"
-            send_telegram_message(msg)
-            print(f"Signal saved: {signal} @ {entry_price:.2f}")
+            msg = f"🚨 <b>NEW SETUP {mode_tag}!</b>\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str}\n\n️ Paper Trading Mode - Do not trade with real money yet!"
+            
+            print("Sending trade alert to Telegram...")
+            success = send_telegram_message(msg)
+            
+            if success:
+                print(f"✅ Signal saved and alert sent: {signal} @ {entry_price:.2f}")
+            else:
+                print(f"️ Signal saved but Telegram alert failed! Trade: {signal} @ {entry_price:.2f}")
+                send_telegram_message(f"⚠️ Trade taken but alert failed!\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f}\nTarget: {target:.2f}")
         else:
             print("No valid signal at this time")
     
