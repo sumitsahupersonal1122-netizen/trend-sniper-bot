@@ -4,7 +4,7 @@ import requests
 import pyotp
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, time as dt_time, timedelta, timezone, timedelta
 
 # === SECRETS FROM GITHUB ===
 AO_CLIENT_ID = os.environ.get('AO_CLIENT_ID')
@@ -22,8 +22,8 @@ BROKERAGE_PER_TRADE = 50
 STARTING_CAPITAL = 50000
 MAX_DAILY_LOSSES = 2
 
-# === ANGEL ONE API ENDPOINTS ===
-AO_BASE_URL = "https://apiconnect.angelbroking.com"
+# === IST TIMEZONE ===
+IST = timezone(timedelta(hours=5, minutes=30))
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -44,17 +44,14 @@ def login_angel_one():
             send_telegram_message("Angel One credentials missing in GitHub Secrets!")
             return None
         
-        # Generate TOTP
         totp = pyotp.TOTP(AO_TOTP_SECRET).now()
         
-        # Login payload
         login_payload = {
             "clientcode": AO_CLIENT_ID,
             "password": AO_PASSWORD,
             "totp": totp
         }
         
-        # Login headers
         login_headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -66,7 +63,6 @@ def login_angel_one():
             "X-PrivateKey": AO_API_KEY
         }
         
-        # Make login request
         login_url = f"{AO_BASE_URL}/rest/auth/angelbroking/user/v1/loginByPassword"
         response = requests.post(login_url, json=login_payload, headers=login_headers)
         
@@ -75,8 +71,9 @@ def login_angel_one():
             if data.get('status') and data['status']:
                 jwt_token = data['data'].get('jwtToken', 'N/A')
                 feed_token = data['data'].get('feedToken', '')
+                now_ist = datetime.now(IST)
                 print(f"Angel One login success!")
-                send_telegram_message(f"Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {datetime.now().strftime('%H:%M')}")
+                send_telegram_message(f"Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {now_ist.strftime('%H:%M')}")
                 return {
                     'jwt_token': jwt_token,
                     'feed_token': feed_token,
@@ -177,7 +174,7 @@ def is_within_trading_time(current_time):
     return dt_time(10, 15) <= current_time <= dt_time(14, 15)
 
 def get_today_losses(trades):
-    today = datetime.now().date()
+    today = datetime.now(IST).date()
     count = 0
     for trade in trades:
         if trade.get('status') == 'CLOSED' and trade.get('result', '').startswith('STOP LOSS'):
@@ -193,7 +190,8 @@ def main():
     print("=" * 50)
     print("Trend Sniper Bot Started")
     print(f"Mode: {'PAPER TRADING' if PAPER_TRADING else 'LIVE TRADING'}")
-    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    now_ist = datetime.now(IST)
+    print(f"Time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
     print("=" * 50)
     
     print("\n[1] Logging into Angel One...")
@@ -216,17 +214,24 @@ def main():
     
     if 'Datetime' in df.columns:
         current_dt = latest['Datetime']
-        if hasattr(current_dt, 'strftime'):
+        if hasattr(current_dt, 'tzinfo') and current_dt.tzinfo is None:
+            current_dt_utc = current_dt.replace(tzinfo=timezone.utc)
+            current_dt_ist = current_dt_utc.astimezone(IST)
+            current_time_str = current_dt_ist.strftime('%H:%M')
+            current_time = current_dt_ist.time()
+        elif hasattr(current_dt, 'strftime'):
             current_time_str = current_dt.strftime('%H:%M')
             current_time = current_dt.time() if hasattr(current_dt, 'time') else dt_time(10, 15)
         else:
-            current_time_str = datetime.now().strftime('%H:%M')
-            current_time = datetime.now().time()
+            now_ist = datetime.now(IST)
+            current_time_str = now_ist.strftime('%H:%M')
+            current_time = now_ist.time()
     else:
-        current_time_str = datetime.now().strftime('%H:%M')
-        current_time = datetime.now().time()
+        now_ist = datetime.now(IST)
+        current_time_str = now_ist.strftime('%H:%M')
+        current_time = now_ist.time()
     
-    print(f"Current Nifty: {current_price:.2f} at {current_time_str}")
+    print(f"Current Nifty: {current_price:.2f} at {current_time_str} IST")
     
     trades = load_trades()
     print(f"\n[4] Loaded {len(trades)} trades from diary")
