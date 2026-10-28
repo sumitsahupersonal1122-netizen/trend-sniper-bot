@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 TRADES_FILE = 'trades.json'
 PAPER_TRADING = True
 LOT_SIZE = 65
-BROKERAGE_PER_TRADE = 50
+BROKERAGE_PER_TRADE = 80  # All-inclusive cost
 STARTING_CAPITAL = 50000
 MAX_DAILY_LOSSES = 2
 
@@ -31,7 +31,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 def send_telegram_message(message, retry=3):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram credentials missing")
+        print("Telegram credentials missing!")
         return False
     
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -89,7 +89,7 @@ def login_angel_one():
                 feed_token = data['data'].get('feedToken', '')
                 now_ist = datetime.now(IST)
                 print(f"Angel One login success!")
-                send_telegram_message(f"✅ Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {now_ist.strftime('%H:%M')}")
+                send_telegram_message(f"✅ Angel One Login Success!\nMode: {'PAPER' if PAPER_TRADING else 'LIVE'}\nTime: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
                 return {
                     'jwt_token': jwt_token,
                     'feed_token': feed_token,
@@ -113,14 +113,20 @@ def login_angel_one():
 
 def get_nifty_data():
     try:
-        nifty = yf.download('^NSEI', period='1mo', interval='15m', progress=False)
+        # CORRECTED: Fetch 1-hour (60-minute) candles
+        # Period 3mo ensures we have enough data for EMA 200 (200 hours ≈ 3 months)
+        nifty = yf.download('^NSEI', period='3mo', interval='1h', progress=False)
+        
         if nifty.empty:
             print("No data received from Yahoo Finance")
             return None
+            
         nifty = nifty.reset_index()
         nifty.columns = [col[0] if isinstance(col, tuple) else col for col in nifty.columns]
+        
         if 'Datetime' not in nifty.columns and 'Date' in nifty.columns:
             nifty.rename(columns={'Date': 'Datetime'}, inplace=True)
+            
         return nifty
     except Exception as e:
         print(f"Data fetch error: {e}")
@@ -151,9 +157,11 @@ def check_open_trades(trades, current_price, current_time_str):
     for trade in trades:
         if trade.get('status') != 'OPEN':
             continue
+            
         hit = False
         result = ""
         exit_price = 0
+        
         if trade['type'] == 'LONG':
             if current_price <= trade['sl']:
                 hit = True
@@ -161,7 +169,7 @@ def check_open_trades(trades, current_price, current_time_str):
                 exit_price = trade['sl']
             elif current_price >= trade['target']:
                 hit = True
-                result = "TARGET HIT 🎯"
+                result = "TARGET HIT "
                 exit_price = trade['target']
         elif trade['type'] == 'SHORT':
             if current_price >= trade['sl']:
@@ -170,8 +178,9 @@ def check_open_trades(trades, current_price, current_time_str):
                 exit_price = trade['sl']
             elif current_price <= trade['target']:
                 hit = True
-                result = "TARGET HIT "
+                result = "TARGET HIT 🎯"
                 exit_price = trade['target']
+        
         if hit:
             trade['status'] = 'CLOSED'
             trade['exit_price'] = exit_price
@@ -181,10 +190,12 @@ def check_open_trades(trades, current_price, current_time_str):
             profit = (pts * LOT_SIZE) - BROKERAGE_PER_TRADE
             if result == "STOP LOSS HIT ❌":
                 profit = -profit
-            msg = f"📊 <b>Trade Closed!</b>\n{result}\nType: {trade['type']}\nEntry: {trade['entry']:.2f}\nExit: {exit_price:.2f}\nP&L: Rs.{profit:.2f}\nTime: {current_time_str}"
+            
+            msg = f"📊 <b>Trade Closed!</b>\n{result}\nType: {trade['type']}\nEntry: {trade['entry']:.2f}\nExit: {exit_price:.2f}\nP&L: Rs.{profit:.2f}"
             send_telegram_message(msg)
             print(f"Trade closed: {result} | P&L: Rs.{profit:.2f}")
             updated = True
+    
     return updated
 
 def is_within_trading_time(current_time):
@@ -220,7 +231,7 @@ def main():
     print("\n[2] Fetching Nifty 50 data...")
     df = get_nifty_data()
     if df is None or df.empty:
-        send_telegram_message(" Nifty data fetch failed!")
+        send_telegram_message("️ Nifty data fetch failed!")
         return
     print(f"Received {len(df)} candles")
     
@@ -305,11 +316,12 @@ def main():
                 'exit_price': None,
                 'result': None
             }
+            
             trades.append(new_trade)
             save_trades(trades)
             
             mode_tag = "(PAPER)" if PAPER_TRADING else "(LIVE)"
-            msg = f"🚨 <b>NEW SETUP {mode_tag}!</b>\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str}\n\n️ Paper Trading Mode - Do not trade with real money yet!"
+            msg = f"🚨 <b>NEW SETUP {mode_tag}!</b>\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str} IST"
             
             print("Sending trade alert to Telegram...")
             success = send_telegram_message(msg)
@@ -317,7 +329,7 @@ def main():
             if success:
                 print(f"✅ Signal saved and alert sent: {signal} @ {entry_price:.2f}")
             else:
-                print(f"️ Signal saved but Telegram alert failed! Trade: {signal} @ {entry_price:.2f}")
+                print(f"⚠️ Signal saved but Telegram alert failed! Trade: {signal} @ {entry_price:.2f}")
                 send_telegram_message(f"⚠️ Trade taken but alert failed!\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f}\nTarget: {target:.2f}")
         else:
             print("No valid signal at this time")
