@@ -2,7 +2,12 @@ name: Trend Sniper Bot
 
 on:
   schedule:
-    - cron: '0,15,30,45 4,5,6,7,8,9 * * 1-5'
+    # CORRECTED: Run every 60 minutes during trading hours (IST)
+    # IST 10:00 = UTC 04:30, IST 11:00 = UTC 05:30, etc.
+    # Running at :30 mark to ensure candle is complete
+    - cron: '30 4,5,6,7,8,9 * * 1-5'
+    # EOD check at 15:15 IST = 09:45 UTC
+    - cron: '45 9 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -12,37 +17,37 @@ jobs:
       contents: write
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install yfinance
-        pip install pandas
-        pip install requests
-        pip install pyotp
-        echo "All packages installed successfully"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance
+          pip install pandas
+          pip install requests
+          pip install pyotp
+          echo "All packages installed successfully"
 
-    - name: Run Trend Sniper Bot
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        AO_CLIENT_ID: ${{ secrets.AO_CLIENT_ID }}
-        AO_PASSWORD: ${{ secrets.AO_PASSWORD }}
-        AO_TOTP_SECRET: ${{ secrets.AO_TOTP_SECRET }}
-        AO_API_KEY: ${{ secrets.AO_API_KEY }}
-      run: python trend_sniper.py
+      - name: Run Trend Sniper Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AO_CLIENT_ID: ${{ secrets.AO_CLIENT_ID }}
+          AO_PASSWORD: ${{ secrets.AO_PASSWORD }}
+          AO_TOTP_SECRET: ${{ secrets.AO_TOTP_SECRET }}
+          AO_API_KEY: ${{ secrets.AO_API_KEY }}
+        run: python trend_sniper.py
 
-    - name: Save Diary (Commit changes)
-      run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add trades.json
-        git commit -m "Update trades diary" || echo "No changes"
-        git push
+      - name: Save Diary (Commit changes)
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add trades.json
+          git commit -m "Update trades diary" || echo "No changes"
+          git push
