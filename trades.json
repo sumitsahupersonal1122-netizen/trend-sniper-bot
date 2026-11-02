@@ -36,10 +36,10 @@
         "entry": 23331.099609375,
         "sl": 23281.099609375,
         "target": 23531.099609375,
-        "status": "OPEN",
+        "status": "CLOSED",
         "entry_time": "10:15",
-        "exit_time": null,
-        "exit_price": null,
-        "result": null
+        "exit_time": "13:15",
+        "exit_price": 23281.099609375,
+        "result": "STOP LOSS HIT \u274c"
     }
 ]
