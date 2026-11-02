@@ -19,9 +19,12 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 TRADES_FILE = 'trades.json'
 PAPER_TRADING = True
 LOT_SIZE = 65
-BROKERAGE_PER_TRADE = 80  # All-inclusive cost
+BROKERAGE_PER_TRADE = 80  # All-inclusive cost (updated from 50)
 STARTING_CAPITAL = 50000
 MAX_DAILY_LOSSES = 2
+SL_POINTS = 40  # UPDATED: 50 se 40 kar diya
+TP_POINTS = 200
+EOD_EXIT_TIME = dt_time(15, 10)  # EOD exit at 3:10 PM (5 min before 3:15)
 
 # === ANGEL ONE API URL ===
 AO_BASE_URL = "https://apiconnect.angelbroking.com"
@@ -113,8 +116,7 @@ def login_angel_one():
 
 def get_nifty_data():
     try:
-        # CORRECTED: Fetch 1-hour (60-minute) candles
-        # Period 3mo ensures we have enough data for EMA 200 (200 hours ≈ 3 months)
+        # Fetch 1-hour (60-minute) candles
         nifty = yf.download('^NSEI', period='3mo', interval='1h', progress=False)
         
         if nifty.empty:
@@ -153,6 +155,10 @@ def save_trades(trades):
         json.dump(trades, f, indent=4)
 
 def check_open_trades(trades, current_price, current_time_str):
+    """
+    Check open trades for SL/TP hits AND EOD exit.
+    EOD exit at 3:10 PM - positions will NOT carry overnight.
+    """
     updated = False
     for trade in trades:
         if trade.get('status') != 'OPEN':
@@ -169,7 +175,7 @@ def check_open_trades(trades, current_price, current_time_str):
                 exit_price = trade['sl']
             elif current_price >= trade['target']:
                 hit = True
-                result = "TARGET HIT "
+                result = "TARGET HIT 🎯"
                 exit_price = trade['target']
         elif trade['type'] == 'SHORT':
             if current_price >= trade['sl']:
@@ -181,6 +187,14 @@ def check_open_trades(trades, current_price, current_time_str):
                 result = "TARGET HIT 🎯"
                 exit_price = trade['target']
         
+        # EOD EXIT: If time is 3:10 PM or later, force exit
+        if not hit:
+            current_time_obj = datetime.strptime(current_time_str, '%H:%M').time()
+            if current_time_obj >= EOD_EXIT_TIME:
+                hit = True
+                result = "EOD EXIT ⏰"
+                exit_price = current_price
+        
         if hit:
             trade['status'] = 'CLOSED'
             trade['exit_price'] = exit_price
@@ -188,8 +202,16 @@ def check_open_trades(trades, current_price, current_time_str):
             trade['exit_time'] = current_time_str
             pts = abs(exit_price - trade['entry'])
             profit = (pts * LOT_SIZE) - BROKERAGE_PER_TRADE
-            if result == "STOP LOSS HIT ❌":
+            
+            # For losses, profit is negative
+            if "STOP LOSS" in result:
                 profit = -profit
+            elif "EOD EXIT" in result:
+                # EOD exit can be profit or loss based on direction
+                if trade['type'] == 'LONG' and exit_price < trade['entry']:
+                    profit = -profit
+                elif trade['type'] == 'SHORT' and exit_price > trade['entry']:
+                    profit = -profit
             
             msg = f"📊 <b>Trade Closed!</b>\n{result}\nType: {trade['type']}\nEntry: {trade['entry']:.2f}\nExit: {exit_price:.2f}\nP&L: Rs.{profit:.2f}"
             send_telegram_message(msg)
@@ -220,6 +242,7 @@ def main():
     print(f"Mode: {'PAPER TRADING' if PAPER_TRADING else 'LIVE TRADING'}")
     now_ist = datetime.now(IST)
     print(f"Time: {now_ist.strftime('%Y-%m-%d %H:%M:%S')} IST")
+    print(f"SL: {SL_POINTS} pts | TP: {TP_POINTS} pts | Lot: {LOT_SIZE}")
     print("=" * 50)
     
     print("\n[1] Logging into Angel One...")
@@ -231,7 +254,7 @@ def main():
     print("\n[2] Fetching Nifty 50 data...")
     df = get_nifty_data()
     if df is None or df.empty:
-        send_telegram_message("️ Nifty data fetch failed!")
+        send_telegram_message("⚠️ Nifty data fetch failed!")
         return
     print(f"Received {len(df)} candles")
     
@@ -302,8 +325,8 @@ def main():
         if signal:
             print(f"\n🚨 NEW {signal} SIGNAL DETECTED!")
             entry_price = close
-            sl = entry_price - 50 if signal == 'LONG' else entry_price + 50
-            target = entry_price + 200 if signal == 'LONG' else entry_price - 200
+            sl = entry_price - SL_POINTS if signal == 'LONG' else entry_price + SL_POINTS
+            target = entry_price + TP_POINTS if signal == 'LONG' else entry_price - TP_POINTS
             
             new_trade = {
                 'type': signal,
@@ -321,7 +344,7 @@ def main():
             save_trades(trades)
             
             mode_tag = "(PAPER)" if PAPER_TRADING else "(LIVE)"
-            msg = f"🚨 <b>NEW SETUP {mode_tag}!</b>\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} (50 pts)\nTarget: {target:.2f} (200 pts)\nTime: {current_time_str} IST"
+            msg = f"🚨 <b>NEW SETUP {mode_tag}!</b>\nType: {signal}\nEntry: {entry_price:.2f}\nSL: {sl:.2f} ({SL_POINTS} pts)\nTarget: {target:.2f} ({TP_POINTS} pts)\nTime: {current_time_str} IST\n⏰ EOD Exit: 3:10 PM"
             
             print("Sending trade alert to Telegram...")
             success = send_telegram_message(msg)
