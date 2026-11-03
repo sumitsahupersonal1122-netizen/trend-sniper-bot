@@ -4,10 +4,10 @@
         "entry": 23660.44921875,
         "sl": 23620.44921875,
         "target": 23860.44921875,
-        "status": "OPEN",
+        "status": "CLOSED",
         "entry_time": "10:15",
-        "exit_time": null,
-        "exit_price": null,
-        "result": null
+        "exit_time": "15:15",
+        "exit_price": 23810.849609375,
+        "result": "EOD EXIT \u23f0"
     }
 ]
