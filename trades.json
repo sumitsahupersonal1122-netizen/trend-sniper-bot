@@ -26,10 +26,10 @@
         "entry": 24820.400390625,
         "sl": 24780.400390625,
         "target": 25020.400390625,
-        "status": "OPEN",
+        "status": "CLOSED",
         "entry_time": "13:15",
-        "exit_time": null,
-        "exit_price": null,
-        "result": null
+        "exit_time": "15:15",
+        "exit_price": 25020.400390625,
+        "result": "TARGET HIT \ud83c\udfaf"
     }
 ]
