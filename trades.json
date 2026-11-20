@@ -53,5 +53,16 @@
         "exit_time": "15:15",
         "exit_price": 25514.30078125,
         "result": "EOD EXIT \u23f0"
+    },
+    {
+        "type": "LONG",
+        "entry": 25550.25,
+        "sl": 25510.25,
+        "target": 25750.25,
+        "status": "OPEN",
+        "entry_time": "10:15",
+        "exit_time": null,
+        "exit_price": null,
+        "result": null
     }
 ]
