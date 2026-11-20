@@ -59,8 +59,19 @@
         "entry": 25550.25,
         "sl": 25510.25,
         "target": 25750.25,
-        "status": "OPEN",
+        "status": "CLOSED",
         "entry_time": "10:15",
+        "exit_time": "14:15",
+        "exit_price": 25750.25,
+        "result": "TARGET HIT \ud83c\udfaf"
+    },
+    {
+        "type": "LONG",
+        "entry": 25774.44921875,
+        "sl": 25734.44921875,
+        "target": 25974.44921875,
+        "status": "OPEN",
+        "entry_time": "14:15",
         "exit_time": null,
         "exit_price": null,
         "result": null
